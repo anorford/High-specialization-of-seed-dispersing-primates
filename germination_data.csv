@@ -1,4 +1,4 @@
-﻿monkey_species,treatment,plant_genus,germination,latency
+﻿primate_species,treatment,plant_genus,germination,latency
 Woolly,Feces,Couma,0.7,NA
 Woolly,No_Pulp,Couma,0.9,NA
 Woolly,Pulp,Couma,1,NA
