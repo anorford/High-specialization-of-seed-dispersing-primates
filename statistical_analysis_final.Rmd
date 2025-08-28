@@ -1,0 +1,299 @@
+---
+title: "Primate SD Analysis V2"
+output: html_document
+date: "2025-06-20"
+---
+
+```{r}
+library("iNEXT")
+library("bipartite")
+library("dplyr")
+library("vegan")
+library("purrr")
+library("tidyselect")
+library("tidyr")
+library("bayesbio")
+library("permute")
+```
+
+***Germination***
+
+```{r}
+germination_data <- read.csv("germination_data.csv")
+```
+
+```{r}
+#Test for differences in germination rate for the three treatments (primate feces, pulp, no pulp).
+set.seed(100)
+
+
+#Replace 0's with a low proportion (0.0025; order of magnitude less than lowest proportion possible (n=40, Couma, Howler, 0.025) in order to generate dissimilarity matrix.
+for(i in 1:length(germination_data[,1])){
+  if(germination_data$germination[i]==0){
+    germination_data$germination[i] <- 0.0025
+  }
+}
+
+
+#Split the data frame up by species, as PERMANOVA is run on each species individually.
+germination_primate <- split(germination_data, germination_data$primate_species)
+
+
+#Run PERMANOVA for each primate species. 
+permanova_germination <- function(df){
+  
+  #Create a matrix of germination values. This resolves a bug in adonis2, which needs a data frame specified for the left-hand term of the formula. 
+  germination_results <- as.matrix(df["germination"])
+  
+  #Run PERMANOVA
+  #Due to lack of replication, could not permute with restriction of species and treatment. Instead, we allocated variance to species first. by="terms" partitions variance to the random effect (month) before the fixed effect (species). 
+  adonis2(germination_results ~ plant_genus + treatment, data = df, by = "terms")
+}
+permanova_germination_results <- lapply(germination_primate, permanova_germination)
+```
+
+```{r}
+#Test for differences in latency (time to germination) for the three treatments (primate feces, pulp, no pulp).
+set.seed(100)
+
+
+#Remove rows with NA for latency.
+latency_data <- germination_data[!is.na(germination_data$latency), ]
+
+
+#Split the data frame up by species, as PERMANOVA is run on each species individually.
+latency_primate <- split(latency_data, latency_data$primate_species)
+
+
+#Run PERMANOVA for each primate species. 
+permanova_latency <- function(df){
+  
+  #Create a matrix of latency values. This resolves a bug in adonis2, which needs a data frame specified for the left-hand term of the formula. 
+  latency_results <- as.matrix(df["latency"])
+  
+  #Run PERMANOVA
+  #Due to lack of replication, could not permute with restriction of species and treatment. Instead, we allocated variance to species first. by="terms" partitions variance to the random effect (month) before the fixed effect (species).
+  adonis2(latency_results ~ plant_genus + treatment, data = df, by = "terms")
+}
+permanova_latency_results <- lapply(latency_primate, permanova_latency)
+```
+
+***Jaccard Index***
+
+```{r}
+jaccard_index_vectors <- read.csv("jaccard_index_vectors.csv")
+```
+
+```{r}
+#Turn the df into vectors of plant genera in the environment or dispersed by each species, dropping empty cells.
+environment <- jaccard_index_vectors$environment
+primates <- jaccard_index_vectors$primates
+primates <- primates[nzchar(primates)]
+woolly <- jaccard_index_vectors$woolly
+woolly <- woolly[nzchar(woolly)]
+howler <- jaccard_index_vectors$howler
+howler <- howler[nzchar(howler)]
+capuchin <- jaccard_index_vectors$capuchin
+capuchin <- capuchin[nzchar(capuchin)]
+squirrel <- jaccard_index_vectors$squirrel
+squirrel <- squirrel[nzchar(squirrel)]
+
+#Create a list of primate vectors.
+primate_vectors <- list(primates, woolly, howler, capuchin, squirrel)
+```
+
+```{r}
+#Create a df to store results.
+species <- c("primates", "woolly", "howler", "capuchin", "squirrel")
+results_jaccard <- data.frame(
+  species = species,
+  jaccard_index = rep(NA_real_, length(species))
+)
+
+#Calculate the Jaccard Index for each primate and for them pooled.
+for(i in 1:length(primate_vectors)){
+  results_jaccard$jaccard_index[i] <- jaccardSets(environment, primate_vectors[[i]])
+}
+```
+
+***Rarefaction***
+
+```{r}
+raw_incidence_all <- read.csv("rarefaction_data.csv")
+```
+
+```{r}
+set.seed(100)
+
+
+#Remove the data for squirrel monkeys in 2023, as this isn't included in calculations, and howler monkeys in 2023 and squirrel monkeys in 2024, as these values are known (they are the primate species with the fewest samples).
+raw_incidence_all <- raw_incidence_all %>% filter(!(primate_species == "squirrel" | primate_species == "howler" & year == 2023))
+
+
+#Split the data frame by species and year. Store the identity of each data frame. 
+primate_species <- "primate_species"
+year <- "year"
+sample_id <- "sample_id"
+raw_incidence <- raw_incidence_all %>% group_by(across(all_of(c(primate_species, year))))
+individual_df <- group_split(raw_incidence)
+df_id <- group_keys(raw_incidence)
+names(individual_df) <- paste(df_id[[primate_species]], df_id[[year]], sep = "__")
+
+
+#Only keep the 1s and 0s and transpose the data frames so that the columns are the fecal samples and the rows are the plant genera, then perform rarefaction.
+raw_incidence_transposed <- function(df){
+  
+  #Determine the number of samples (level) to use in rarefaction based on the year. 7 for 2023 and 9 for 2024, as these were the minimum number of samples for a primate species in each year.
+  year_id <- unique(df[[year]])
+  selected_year <- suppressWarnings(as.integer(year_id[1]))
+  level <- if(isTRUE(selected_year == 2023)) 7L else if(isTRUE(selected_year == 2024)) 9L 
+  
+  #Only keep the 1s and 0s
+  remove_columns_incidence <- intersect(c(sample_id, primate_species, year), names(df))
+  incidence_only <- df[, setdiff(names(df), remove_columns_incidence), drop = FALSE]
+  numeric_columns <- vapply(incidence_only, is.numeric, logical(1))
+  incidence_only <- incidence_only[ , numeric_columns, drop = FALSE]
+  
+  #Have the column names be the sample_id. 
+  sample_names <- if (sample_id %in% names(df)){
+    make.unique(as.character(df[[sample_id]]))
+  } else{
+    as.character(seq_len(nrow(df)))
+  }
+  
+  #Transpose the data frame so that the columns are the fecal samples and the rows are the plant genera.
+  raw_incidence_trans <- as.data.frame(t(as.matrix(incidence_only)), check.names = FALSE, stringsAsFactors = FALSE)
+  colnames(raw_incidence_trans) <- sample_names
+  
+  #Bernoulli product model sample-based interpolation
+  #Raw incidence data (for each sample is the plant there or not); Hill value 0 (species richness); base = size and level = 7 does rarefaction to 7 samples; 95% confidence intervals
+  estimateD(raw_incidence_trans, q = 0, datatype = "incidence_raw", base = "size", level = level, conf = 0.95)
+}
+
+
+#Run this function for all dfs.
+results_rarefaction <- lapply(individual_df, raw_incidence_transposed)
+
+
+#Combine the results into a df.
+results_rarefaction_all <- imap_dfr(results_rarefaction, ~{
+  if(is.null(.x)) return(NULL)
+  as_tibble(.x) %>%
+    mutate(group = .y, .before = 1) %>%
+    separate(group, into = c("primate_species", "year"), sep = "__", remove = TRUE, fill = "right") %>% 
+    mutate(year = suppressWarnings(as.integer(year)))
+})
+```
+
+***Standardized Specialization***
+
+```{r}
+abundance_all <- read.csv("specialization_data.csv")
+```
+
+```{r}
+#Calculate d_e' and d_n' for each species for each sampling period.
+set.seed(100)
+
+
+#Split the df by sampling period. Store the identity of each df. Remove the columns for year and sampling period.
+abundance_sampling_period <- split(abundance_all, abundance_all$sampling_period)
+clean_abundance_source <- lapply(abundance_sampling_period, function(df){
+  remove_columns_abundance <- intersect(c("year", "sampling_period", "seed_source"), names(df))
+  abundance_only <- df[, setdiff(names(df), remove_columns_abundance), drop = FALSE]
+})
+
+
+#Save the abundances of the seeds in the primate feces as a df and the environmental abundance as a vector.
+primate_seed <- lapply(clean_abundance_source, function(df){
+  
+  #Store the first three of four rows in a data frame.
+  df[seq_len(min(3,4)), , drop = FALSE]
+})
+
+
+#Save the abundances of the seeds in the environment as a vector.
+environment_seed <- lapply(clean_abundance_source, function(df){
+  environment_abundance <- unlist(df[4, , drop = TRUE], use.names = TRUE)
+  
+  #Remove "environment" from the vector.
+  environment_abundance <- environment_abundance[setdiff(names(environment_abundance), c("seed_source"))]
+  
+  #Make the vector numeric while keeping the names of the plants as the different elements of the vector.
+  environment_abundance <- setNames(suppressWarnings(as.numeric(environment_abundance)), names(environment_abundance))
+  environment_abundance
+})
+
+
+#Calculate d_e' for each species in each sampling period.
+d_e <- function(primate, environment) dfun(primate, environment)
+d_e_results <- Map(d_e, primate_seed, environment_seed)
+
+
+#Create a vector of d_e_results.
+d_e_results_vector <- unlist(lapply(d_e_results, function(x) as.numeric(x$dprime)), use.names = FALSE)
+
+
+#Store results of d_e'.
+specialization_results <-  data.frame(
+    sampling_period = rep(1:6, each = 3),
+    primate_species = c(rep(c("woolly", "howler", "capuchin"), 3), rep(c("howler", "capuchin", "squirrel"), 3)),
+    year = c(rep(c(2023), 9), rep(c(2024), 9)),
+    d_e = d_e_results_vector,
+    row.names = NULL
+)
+
+
+#Calculate d_n' for each species in each sampling period.
+d_n <- function(primate) dfun(primate)
+d_n_results <- Map(d_n, primate_seed)
+
+
+#Create a vector of d_n_results.
+d_n_results_vector <- unlist(lapply(d_n_results, function(x) as.numeric(x$dprime)), use.names = FALSE)
+
+
+#Store results of d_n' as another column in specialization results.
+specialization_results <- cbind(specialization_results, d_n = d_n_results_vector)
+```
+
+```{r}
+#Test for differences among species with PERMANOVA.
+set.seed(100)
+
+
+#Split data into 2023 and 2024.
+specialization_results_year <- split(specialization_results, specialization_results$year)
+
+
+#Run PERMANOVA for d_e for both years. 
+permanova_d_e <- function(df){
+  
+  #Create a matrix of d_e values. This resolves a bug in adonis2, which needs a data frame specified for the left-hand term of the formula. 
+  d_e_results_matrix <- as.matrix(df["d_e"])
+  
+  #Run PERMANOVA
+  #Create a permutation that permutes within sampling period.
+  permutation <- how(blocks = df$sampling_period, within=Within(type="free"), minperm = 1)
+  
+  #Test for the effect of species with sampling period as the blocking variable (using permutation as specified above). 
+  adonis2(d_e_results_matrix ~ primate_species, data = df, permutations = permutation, by = "terms")
+}
+permanova_d_e_results <- lapply(specialization_results_year, permanova_d_e)
+
+
+#Run PERMANOVA for d_n for both years. 
+permanova_d_n <- function(df){
+  
+  #Create a matrix of d_n values. This resolves a bug in adonis2, which needs a data frame specified for the left-hand term of the formula. 
+  d_n_results_matrix <- as.matrix(df["d_n"])
+  
+  #Run PERMANOVA
+  #Create a permutation that permutes within sampling period.
+  permutation <- how(blocks = df$sampling_period, within=Within(type="free"), minperm = 1)
+  
+  #Test for the effect of species with sampling period as the blocking variable (using permutation as specified above).  
+  adonis2(d_n_results_matrix ~ primate_species, data = df, permutations = permutation, by = "terms")
+}
+permanova_d_n_results <- lapply(specialization_results_year, permanova_d_n)
+```
