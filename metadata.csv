@@ -1,0 +1,30 @@
+﻿germination_data,
+Column,Definition
+primate_species,Primate common name.
+treatment,"Feces (seeds removed from fecal samples, rinsed with water, and left to air dry in the shade for a day), pulp (seeds planted with pulp), or no pulp (seeds planted without pulp)."
+plant_genus,Genus of plant.
+germination,Number germinated/quantity.
+latency,Average number of days to germination. Days counted not including the day planted.
+,
+jaccard_index_data,
+Column,Definition
+environment,Plant genera with fruit found in the environment over the entire study.
+primates,Plant genera for which the seeds are found in primate feces over the entire study.
+woolly,Plant genera for which the seeds are found in the woolly monkey feces over the entire study.
+howler,Plant genera for which the seeds are found in the howler monkey feces over the entire study.
+capuchin,Plant genera for which the seeds are found in the capuchin monkey feces over the entire study.
+squirrel,Plant genera for which the seeds are found in the squirrel monkey feces over the entire study.
+,
+rarefaction_data,
+Column,Definition
+sample_id,The ID of the fecal sample.
+primate_species,Primate common name.
+year,The year in which we collected the sample.
+All other columns,Genus of plant. 1 indicates the seeds of that plant were intact in the fecal sample and 0 indicates they were not present in the fecal sample or were broken into pieces.
+,
+specialization_data,
+Column,Definition
+year,The year in which the sampling period falls.
+sampling_period,Period of 5 weeks over which we collected samples.
+seed_source,Source of seeds. Either from monkey feces or in the environment (fruit and seed survey).
+All other columns,"Genus of plant. The number is the abundance of the seeds of that plant in the samples. If we did not find the fruiting plant in the environment during surveys, then we assigned 1, rather than 0."
